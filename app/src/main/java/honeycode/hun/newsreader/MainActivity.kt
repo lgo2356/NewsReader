@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
+import android.view.View
 import androidx.recyclerview.widget.LinearLayoutManager
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.*
@@ -11,100 +12,195 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.w3c.dom.NodeList
 import java.io.InputStream
-import java.io.InputStreamReader
+import java.lang.Exception
 import java.lang.IndexOutOfBoundsException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import javax.xml.parsers.DocumentBuilder
 import javax.xml.parsers.DocumentBuilderFactory
+import kotlin.system.measureTimeMillis
 
 class MainActivity : AppCompatActivity() {
-    private val mData = ArrayList<NewsListItem>()
+    private val mDataList = ArrayList<NewsListItem>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val intent = Intent(this, SplashActivity::class.java)
-        startActivity(intent)
+        val splashIntent = Intent(this, SplashActivity::class.java)
+        startActivity(splashIntent)
+        val newsDetailIntent = Intent(this, NewsDetailActivity::class.java)
 
-        val newsListAdapter = NewsListAdapter(this, mData)
+        val newsListAdapter = NewsListAdapter(this, mDataList)
         news_list.layoutManager = LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false)
         news_list.adapter = newsListAdapter
 
-        val newsDocs = ArrayList<Document>()
-        GlobalScope.launch(Dispatchers.Main) {
-            val httpCoroutine = async(Dispatchers.IO) {
-                val inputStream: InputStream = getInputStream(URL("https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"))
-                val docBuilder: DocumentBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder()
-                val nodeList: NodeList = docBuilder.parse(inputStream).documentElement.getElementsByTagName("item")
-                for(i in 0 until 10) {  // 완료된 아이템 부터 리스트 업하는 방법 검토
+        newsListAdapter.setItemClickListener(object: NewsListAdapter.ItemClickListener {
+            override fun onClick(view: View, position: Int) {
+                newsDetailIntent.putExtra("news_url", mDataList[position].newsUrl)
+                newsDetailIntent.putExtra("title", mDataList[position].title)
+                newsDetailIntent.putExtra("first", mDataList[position].first)
+                newsDetailIntent.putExtra("second", mDataList[position].second)
+                newsDetailIntent.putExtra("third", mDataList[position].third)
+                startActivity(newsDetailIntent)
+            }
+        })
+
+        val listUpCoroutine = CoroutineScope(Dispatchers.IO)
+        listUpCoroutine.launch {
+            val inputStream = getInputStream(URL("https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"))
+            val documentBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder()
+            val nodeList = documentBuilder.parse(inputStream).documentElement.getElementsByTagName("item")
+
+            launch {
+                for(i in 0 until 3) {
                     try {
-                        Log.d("TAG", "IO Index: $i")
-                        val newsArticleUrl: String = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
-                        newsDocs.add(Jsoup.connect(newsArticleUrl).get())
-//                        val newsThumbnailUrl = jsoupDocument.select("meta[property=og:image]")[0].attr("content")
-//                        val newsTitle: String = nodeList.item(i).childNodes.item(0).childNodes.item(0).nodeValue
-//                        val newsDescription = jsoupDocument.select("meta[property=og:description]")[0].attr("content")
-                    } catch (e: IndexOutOfBoundsException) {
+                        val newsArticleUrl = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
+                        val newsTitle: String = nodeList.item(i).childNodes.item(0).childNodes.item(0).nodeValue
+
+                        Log.d("TAG", "List $i news url: $newsArticleUrl")
+                        val jDoc = Jsoup.connect(newsArticleUrl).get()
+                        val newsDescription = getDescription(jDoc)
+                        val newsThumbnailUrl = try { jDoc.select("meta[property=og:image]")[0].attr("content") } catch(e: Exception) { null }
+                        val keywords = getKeywords(newsDescription)
+                        addNewsItem(newsArticleUrl, newsThumbnailUrl, newsTitle, newsDescription, keywords[0], keywords[1], keywords[2])
+                        launch(Dispatchers.Main) { newsListAdapter.notifyDataSetChanged() }
+                    } catch (e: Exception) {
                         e.printStackTrace()
                     }
                 }
             }
-            val testCoroutine = async(Dispatchers.Default) {
-                try {
-                    var i  = 0
-                    while (true) {
-                        if(newsDocs.size > newsListAdapter.itemCount) {
-                            Log.d("TAG", "Test Index: $i")
-                            val newsThumbnailUrl = newsDocs[i].select("meta[property=og:image]")[0].attr("content")
-                            val newsDescription = newsDocs[i].select("meta[property=og:description]")[0].attr("content")
-                            addNewsItem(newsThumbnailUrl, "TEST", newsDescription)
-//                            newsListAdapter.notifyDataSetChanged()
-                            i += 1
-                        }
 
-                        if(i >= 9) break
+            launch {
+                for(i in 3 until 10) {
+                    try {
+                        val newsArticleUrl = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
+                        val newsTitle: String = nodeList.item(i).childNodes.item(0).childNodes.item(0).nodeValue
+
+                        Log.d("TAG", "List $i news url: $newsArticleUrl")
+                        val jDoc = Jsoup.connect(newsArticleUrl).get()
+                        val newsDescription = getDescription(jDoc)
+                        val newsThumbnailUrl = try { jDoc.select("meta[property=og:image]")[0].attr("content") } catch(e: Exception) { null }
+                        val keywords = getKeywords(newsDescription)
+                        addNewsItem(newsArticleUrl, newsThumbnailUrl, newsTitle, newsDescription, keywords[0], keywords[1], keywords[2])
+                        launch(Dispatchers.Main) { newsListAdapter.notifyDataSetChanged() }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-//                    for(newsDoc in newsDocs) {
-//                        val newsThumbnailUrl = newsDoc.select("meta[property=og:image]")[0].attr("content")
-//                        val newsDescription = newsDoc.select("meta[property=og:description]")[0].attr("content")
-//                        addNewsItem(newsThumbnailUrl, "TEST", newsDescription)
-//                    }
-                } catch (e: IndexOutOfBoundsException) {e.printStackTrace()}
-//                val newsThumbnailUrl = newsArticleUrlList[0].select("meta[property=og:image]")[0].attr("content")
-//                val newsDescription = newsArticleUrlList[0].select("meta[property=og:description]")[0].attr("content")
+                }
             }
-            testCoroutine.await()
 
-//            val ioCoroutine2 = async(Dispatchers.IO) {
-//                val inputStream: InputStream = getInputStream(URL("https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"))
-//                val docBuilder: DocumentBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder()
-//                val nodeList: NodeList = docBuilder.parse(inputStream).documentElement.getElementsByTagName("item")
-//
-//                for(i in 10 until 20) {
-//                    try {
-//                        Log.d("TAG", "Index: $i")
-//                        val newsArticleUrl: String = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
-//                        newsDocs.add(Jsoup.connect(newsArticleUrl).get())
-//                    } catch (e: IndexOutOfBoundsException) {
-//                        e.printStackTrace()
-//                    }
-//                }
-//            }
-            httpCoroutine.await()
-//            ioCoroutine2.await()
-            Log.d("TAG", "item count: ${newsListAdapter.itemCount}")
-            newsListAdapter.notifyDataSetChanged()
+            launch {
+                for(i in 10 until nodeList.length) {
+                    try {
+                        val newsArticleUrl = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
+                        val newsTitle: String = nodeList.item(i).childNodes.item(0).childNodes.item(0).nodeValue
+
+                        Log.d("TAG", "List $i news url: $newsArticleUrl")
+                        val jDoc = Jsoup.connect(newsArticleUrl).get()
+                        val newsDescription = getDescription(jDoc)
+                        val newsThumbnailUrl = try { jDoc.select("meta[property=og:image]")[0].attr("content") } catch(e: Exception) { null }
+                        val keywords = getKeywords(newsDescription)
+                        addNewsItem(newsArticleUrl, newsThumbnailUrl, newsTitle, newsDescription, keywords[0], keywords[1], keywords[2])
+                        launch(Dispatchers.Main) { newsListAdapter.notifyDataSetChanged() }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
         }
 
-        Log.d("TAG", "done in main thread")
+        swipe_refresh_news_list.setOnRefreshListener {
+            val updateCoroutine = CoroutineScope(Dispatchers.IO)
+            updateCoroutine.launch {
+                var updatedFlag = false
+                val inputStream = getInputStream(URL("https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"))
+                val documentBuilder = DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                val nodeList = documentBuilder.parse(inputStream).documentElement.getElementsByTagName("item")
+
+                val firstTitle: String = nodeList.item(0).childNodes.item(0).childNodes.item(0).nodeValue
+                if(firstTitle != mDataList[0].title) {
+                    listUpCoroutine.cancel()
+                    updatedFlag = true
+                }
+
+                if(updatedFlag) {
+                    for(i in newsListAdapter.itemCount.minus(1) downTo 0) {
+                        removeNewsItem(i)
+                    }
+                    launch(Dispatchers.Main) { newsListAdapter.notifyDataSetChanged() }
+
+                    launch {
+                        for(i in 0 until 3) {
+                            try {
+                                val newsArticleUrl = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
+                                val newsTitle: String = nodeList.item(i).childNodes.item(0).childNodes.item(0).nodeValue
+
+                                Log.d("TAG", "List $i news url: $newsArticleUrl")
+                                val jDoc = Jsoup.connect(newsArticleUrl).get()
+                                val newsDescription = getDescription(jDoc)
+                                val newsThumbnailUrl = try { jDoc.select("meta[property=og:image]")[0].attr("content") } catch(e: Exception) { null }
+                                val keywords = getKeywords(newsDescription)
+                                addNewsItem(newsArticleUrl, newsThumbnailUrl, newsTitle, newsDescription, keywords[0], keywords[1], keywords[2])
+                                launch(Dispatchers.Main) { newsListAdapter.notifyDataSetChanged() }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+
+                    launch {
+                        for(i in 3 until 10) {
+                            try {
+                                val newsArticleUrl = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
+                                val newsTitle: String = nodeList.item(i).childNodes.item(0).childNodes.item(0).nodeValue
+
+                                Log.d("TAG", "List $i news url: $newsArticleUrl")
+                                val jDoc = Jsoup.connect(newsArticleUrl).get()
+                                val newsDescription = getDescription(jDoc)
+                                val newsThumbnailUrl = try { jDoc.select("meta[property=og:image]")[0].attr("content") } catch(e: Exception) { null }
+                                val keywords = getKeywords(newsDescription)
+                                addNewsItem(newsArticleUrl, newsThumbnailUrl, newsTitle, newsDescription, keywords[0], keywords[1], keywords[2])
+                                launch(Dispatchers.Main) { newsListAdapter.notifyDataSetChanged() }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+
+                    launch {
+                        for(i in 10 until nodeList.length) {
+                            try {
+                                val newsArticleUrl = nodeList.item(i).childNodes.item(1).childNodes.item(0).nodeValue
+                                val newsTitle: String = nodeList.item(i).childNodes.item(0).childNodes.item(0).nodeValue
+
+                                Log.d("TAG", "List $i news url: $newsArticleUrl")
+                                val jDoc = Jsoup.connect(newsArticleUrl).get()
+                                val newsDescription = getDescription(jDoc)
+                                val newsThumbnailUrl = try { jDoc.select("meta[property=og:image]")[0].attr("content") } catch(e: Exception) { null }
+                                val keywords = getKeywords(newsDescription)
+                                addNewsItem(newsArticleUrl, newsThumbnailUrl, newsTitle, newsDescription, keywords[0], keywords[1], keywords[2])
+                                launch(Dispatchers.Main) { newsListAdapter.notifyDataSetChanged() }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                    }
+                }
+            }
+
+            Log.d("TAG", "News list refreshed.")
+            swipe_refresh_news_list.isRefreshing = false
+        }
     }
 
-    private fun addNewsItem(pThumbnail: String?, pTitle: String?, pContent: String?) {
-        val item = NewsListItem(pThumbnail, pTitle, pContent)
-        mData.add(item)
+    private fun addNewsItem(pNewsUrl: String, pThumbnail: String?, pTitle: String, pContent: String, pFirst: String, pSecond: String, pThird: String) {
+        val item = NewsListItem(pNewsUrl, pThumbnail, pTitle, pContent, pFirst, pSecond, pThird)
+        mDataList.add(item)
+    }
+
+    private fun removeNewsItem(position: Int) {
+        mDataList.removeAt(position)
     }
 
     private fun getInputStream(url: URL): InputStream {
@@ -124,31 +220,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadHtml(url: URL): String {
-        var conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "GET"
-        Log.d("TAG", "Http Response Code: ${conn.responseCode}")
-
-        return when(conn.responseCode) {
-            HttpURLConnection.HTTP_OK -> {
-                val buffer = StringBuffer()
-                val bufferedReader = InputStreamReader(conn.inputStream, "utf-8")
-                for(line in bufferedReader.readText()) buffer.append(line)
-                bufferedReader.close()
-                buffer.toString()
-            }
-            HttpURLConnection.HTTP_MOVED_TEMP, HttpURLConnection.HTTP_MOVED_PERM -> {
-                val redirectedUrl: String = conn.getHeaderField("Location")
-                conn = URL(redirectedUrl).openConnection() as HttpURLConnection
-                conn.requestMethod = "GET"
-
-                val bufferedReader = InputStreamReader(conn.inputStream, "utf-8")
-                val buffer = StringBuffer()
-                for(line in bufferedReader.readText()) buffer.append(line)
-                bufferedReader.close()
-                buffer.toString()
-            }
-            else -> "Html 로드를 실패했습니다."
+    private fun getKeywords(desc: String): ArrayList<String> {
+        val replaceWord = desc.replace("[,&#;\'\"‘’“”]".toRegex(), "")
+        val words = replaceWord.split(" ", "\n") as MutableList<String>
+        val iterator = words.iterator()
+        while(iterator.hasNext()) {
+            val word = iterator.next()
+            if(word.length <= 1) iterator.remove()
         }
+
+        val wordMap: MutableMap<String, Int?> = mutableMapOf()
+        for(word in words) wordMap[word] = wordMap[word]?.plus(1)?:1
+        val sortedByValue = wordMap.toList().sortedBy { it.first }.sortedByDescending { it.second }
+
+        val result = ArrayList<String>()
+        for(i in 0 until 3) result.add(sortedByValue[i].first)
+        return result
+    }
+
+    private fun getDescription(jsoupDoc: Document): String {
+        val propertyDesc = jsoupDoc.select("meta[property=og:description]")
+        val newsDescription: String
+
+        newsDescription = if(propertyDesc.size <= 0) {
+            jsoupDoc.select("meta[name=description]")[0].attr("content")
+        } else {
+            propertyDesc[0].attr("content")
+        }
+        return newsDescription
     }
 }

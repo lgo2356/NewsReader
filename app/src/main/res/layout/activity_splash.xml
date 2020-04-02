@@ -17,7 +17,7 @@
         android:layout_marginTop="20dp"
         android:layout_marginBottom="30dp"
         android:scaleType="centerInside"
-        android:src="@drawable/main_splash_image2" />
+        android:src="@drawable/main_splash_image" />
 
     <ImageView
         app:layout_constraintBottom_toBottomOf="@id/main_splash_image"
